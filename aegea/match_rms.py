@@ -201,7 +201,7 @@ def main():
     source_dir = test_dir / 'eng'
     target_dir = test_dir / 'ita'
     output_dir = test_dir / 'out'
-    report_path = test_dir / 'report.xlsx'
+    report_path = test_dir / 'report.xls'
 
     source_suffix = "_ENG.wav"
     target_suffix = "_ITA.wav"
