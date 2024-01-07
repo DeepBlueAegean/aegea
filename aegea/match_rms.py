@@ -8,7 +8,7 @@ from typing import Tuple
 
 import numpy as np
 import soundfile as sf
-import xlwt
+import xlsxwriter
 
 
 def get_rms_and_peak(
@@ -145,63 +145,79 @@ def process_audio_files(
 
     # Compile report at the end
     compile_report(
-        source_dir, output_dir, source_suffix, target_suffix, report_path
+        source_dir, target_dir, output_dir, source_suffix, target_suffix, report_path
     )
     print("Audio processing complete.")
 
 
 def compile_report(
-    source_folder, output_folder, source_suffix, target_suffix, report_path
+    source_folder, target_folder, output_folder, source_suffix, target_suffix, report_path
 ):
-    book = xlwt.Workbook()
-    sheet = book.add_sheet("RMS and Peak Levels")
+    # Create a workbook and add a worksheet.
+    workbook = xlsxwriter.Workbook(report_path)
+    worksheet = workbook.add_worksheet("RMS and Peak Levels")
+
+    # Headers for the columns
     headers = [
         "File Name",
         "Source RMS (dB)",
         "Source Peak (dB)",
+        "Target RMS (dB)",  # New column for target RMS
+        "Target Peak (dB)", # New column for target peak
         "Output RMS (dB)",
         "Output Peak (dB)",
         "RMS Difference (dB)",
     ]
+
+    # Write the headers
     for col, header in enumerate(headers):
-        sheet.write(0, col, header)
+        worksheet.write(0, col, header)
 
     row = 1
     for filename in os.listdir(output_folder):
         if filename.endswith(target_suffix):
-            base_name = filename[: -len(target_suffix)]
+            base_name = filename[:-len(target_suffix)]
             source_file = os.path.join(source_folder, base_name + source_suffix)
+            target_file = os.path.join(target_folder, base_name + target_suffix)
             output_file = os.path.join(output_folder, filename)
 
             if os.path.isfile(source_file) and os.path.isfile(output_file):
-                source_rms_db, source_peak_db = get_rms_and_peak(
-                    source_file
-                )
-                output_rms_db, output_peak_db = get_rms_and_peak(
-                    output_file
-                )
+                source_rms_db, source_peak_db = get_rms_and_peak(source_file)
+                target_rms_db, target_peak_db = get_rms_and_peak(target_file)  # Get target file RMS and Peak
+                output_rms_db, output_peak_db = get_rms_and_peak(output_file)
                 rms_difference_out = abs(source_rms_db - output_rms_db)
 
-                sheet.write(row, 0, filename)
-                sheet.write(row, 1, source_rms_db)
-                sheet.write(row, 2, source_peak_db)
-                sheet.write(row, 3, output_rms_db)
-                sheet.write(row, 4, output_peak_db)
-                sheet.write(row, 5, rms_difference_out)
+                # Write data to the worksheet
+                worksheet.write(row, 0, filename)
+                worksheet.write(row, 1, source_rms_db)
+                worksheet.write(row, 2, source_peak_db)
+                worksheet.write(row, 3, target_rms_db)  # New data
+                worksheet.write(row, 4, target_peak_db) # New data
+                worksheet.write(row, 5, output_rms_db)
+                worksheet.write(row, 6, output_peak_db)
+                worksheet.write(row, 7, rms_difference_out)
 
                 row += 1
 
-    book.save(report_path)
+    # Close the workbook
+    workbook.close()
 
 
 def main():
     """Main entrypoint for this `dad_version.py` script."""
 
-    test_dir = Path('./test').resolve()
-    source_dir = test_dir / 'eng'
-    target_dir = test_dir / 'ita'
-    output_dir = test_dir / 'out'
-    report_path = test_dir / 'report.xls'
+    # Ask the user for the source, target, and output directories
+    source_dir_input = input("Enter the path for the source directory: ")
+    target_dir_input = input("Enter the path for the target directory: ")
+    output_dir_input = input("Enter the path for the output directory: ")
+
+    # Convert user input to Path objects
+    source_dir = Path(source_dir_input).resolve()
+    target_dir = Path(target_dir_input).resolve()
+    output_dir = Path(output_dir_input).resolve()
+
+    # Rest of your code remains the same
+    report_path = output_dir / 'report.xlsx'
 
     source_suffix = "_ENG.wav"
     target_suffix = "_ITA.wav"
@@ -219,7 +235,6 @@ def main():
         user_defined_rms_diff_threshold,
         report_path,
     )
-
 
 if __name__ == '__main__':
     main()
