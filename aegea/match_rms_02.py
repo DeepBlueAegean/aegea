@@ -1,5 +1,3 @@
-"""Dad-made original script."""
-
 import os
 import shutil
 import subprocess
@@ -11,34 +9,15 @@ import soundfile as sf
 import xlsxwriter
 
 
-def get_rms_and_peak(
-    filepath: Path
-) -> Tuple[float, float]:
-    """Computes the RMS and peak RMS values of a soundfile in dB.
-
-    Args:
-        filepath (Path): Audio file path.
-
-    Returns:
-        Tuple[float, float]: RMS and Peak RMS in dB.
-    """
-    # Read audiofile.
+def get_rms_and_peak(filepath: Path) -> Tuple[float, float]:
+    """Computes the RMS and peak RMS values of a soundfile in dB."""
     data, _ = sf.read(filepath, dtype="int32")
-
-    # Compute RMS + peak RMS
     normalized_data = data / np.iinfo(np.int32).max
     rms_value_float = np.sqrt(np.mean(normalized_data**2))
     peak_value_float = np.max(np.abs(normalized_data))
 
-    # Convert RMS and peak RMS to dB.
-    rms_value_db = (
-        20 * np.log10(rms_value_float)
-        if rms_value_float > 0 else -float("inf")
-    )
-    peak_value_db = (
-        20 * np.log10(peak_value_float)
-        if peak_value_float > 0 else -float("inf")
-    )
+    rms_value_db = 20 * np.log10(rms_value_float) if rms_value_float > 0 else -float("inf")
+    peak_value_db = 20 * np.log10(peak_value_float) if peak_value_float > 0 else -float("inf")
 
     return rms_value_db, peak_value_db
 
@@ -51,6 +30,9 @@ def apply_compression_gain_and_limiting(
     ratio=2,
     peak_limit=-0.5
 ):
+    # Ensure threshold_db is within -30 to 0
+    threshold_db = max(-30, min(threshold_db, 0))
+
     print(
         f"Applying compression, gain adjustment, peak limiting, and converting to 24-bit: Gain = {gain_db} dB, Threshold = {threshold_db} dB, Ratio = {ratio}, Peak Limit = {peak_limit} dB"
     )
@@ -84,7 +66,7 @@ def process_audio_files(
 
     for filename in os.listdir(target_dir):
         if filename.endswith(target_suffix):
-            base_name = filename[: -len(target_suffix)]
+            base_name = filename[:-len(target_suffix)]
             source_file = os.path.join(source_dir, base_name + source_suffix)
             target_file = os.path.join(target_dir, filename)
             output_file = os.path.join(output_dir, filename)
@@ -93,40 +75,51 @@ def process_audio_files(
                 source_rms_db, _ = get_rms_and_peak(source_file)
                 target_rms_db, target_peak_db = get_rms_and_peak(target_file)
 
-                rms_difference = abs(source_rms_db - target_rms_db)
+                rms_difference = source_rms_db - target_rms_db
 
-                if rms_difference < rms_diff_threshold:
-                    # No need to process.
-                    print(
-                        f"RMS difference ({rms_difference} dB) is below "
-                        "threshold for file {filename}. Copying without "
-                        "processing."
-                    )
+                if -rms_diff_threshold <= rms_difference <= rms_diff_threshold:
+                    print(f"RMS difference ({rms_difference} dB) is within user_defined_rms_diff_threshold for file {filename}. Copying without processing.")
                     shutil.copy(target_file, output_file)
 
-                else:
-                    # Compress.
-                    gain_db = source_rms_db - target_rms_db
-                    adjusted_gain_db = (
-                        gain_db + 2
-                        if target_peak_db + gain_db > 0 else gain_db
-                    )
+                elif rms_difference < 0:
+                    # Only apply gain adjustment
+                    adjusted_gain_db = rms_difference  
                     apply_compression_gain_and_limiting(
                         target_file,
                         output_file,
                         adjusted_gain_db,
-                        -adjusted_gain_db - 3,
+                        threshold_db=-1,  # Default threshold for gain-only processing
+                        ratio=1,          # No compression, only gain adjustment
+                        peak_limit=peak_limit,
+                    )
+                    print(f"ELIF Applied gain adjustment : decreased {adjusted_gain_db} dB for file {filename}")
+
+                else:
+                    gain_db = rms_difference
+                    print(f"Gain_db after else= {gain_db} = source_rms_db - target_rms_db")
+                    adjusted_gain_db = gain_db - 1 if target_peak_db + gain_db > 0 else gain_db
+                    print(f"adjusted_gain_db = {adjusted_gain_db} =gain_db - 2 if target_peak_db + gain_db > 0 else gain_db")
+
+                    # Calculate and clamp threshold_db within 0.5 to 1
+                    threshold_db = -adjusted_gain_db-2
+                    print(f" threshold_db = {threshold_db} == -adjusted_gain_db - 3")
+                    
+                    threshold_db = max(-30, min(threshold_db, 0))
+                    print(f" threshold_db after clamping = {threshold_db} ")
+ 
+                    apply_compression_gain_and_limiting(
+                        target_file,
+                        output_file,
+                        adjusted_gain_db,
+                        threshold_db,
                         20,
                         peak_limit,
                     )
-
-                    # Check RMS difference after initial processing
+                    print(f"target file {filename} loudness was {gain_db} lower than source: output file compressed")
                     output_rms_db, _ = get_rms_and_peak(output_file)
                     rms_difference_out = abs(source_rms_db - output_rms_db)
                     if rms_difference_out > rms_diff_threshold:
-                        print(
-                            f"Reprocessing file {filename} due to high RMS difference."
-                        )
+                        print(f"Reprocessing file {filename} due to high RMS difference.")
                         apply_compression_gain_and_limiting(
                             target_file,
                             output_file,
@@ -136,40 +129,20 @@ def process_audio_files(
                             peak_limit,
                         )
 
-                print(
-                    f"rms_difference_out: {rms_difference_out}, rms_diff_threshold: {rms_diff_threshold}, "
-                )
                 print(f"Processed: {filename}")
             else:
                 print(f"Missing matching file for: {filename}")
 
-    # Compile report at the end
-    compile_report(
-        source_dir, target_dir, output_dir, source_suffix, target_suffix, report_path
-    )
+    compile_report(source_dir, target_dir, output_dir, source_suffix, target_suffix, report_path)
     print("Audio processing complete.")
 
 
-def compile_report(
-    source_folder, target_folder, output_folder, source_suffix, target_suffix, report_path
-):
-    # Create a workbook and add a worksheet.
+
+def compile_report(source_folder, target_folder, output_folder, source_suffix, target_suffix, report_path):
     workbook = xlsxwriter.Workbook(report_path)
     worksheet = workbook.add_worksheet("RMS and Peak Levels")
 
-    # Headers for the columns
-    headers = [
-        "File Name",
-        "Source RMS (dB)",
-        "Source Peak (dB)",
-        "Target RMS (dB)",  # New column for target RMS
-        "Target Peak (dB)", # New column for target peak
-        "Output RMS (dB)",
-        "Output Peak (dB)",
-        "RMS Difference (dB)",
-    ]
-
-    # Write the headers
+    headers = ["File Name", "Source RMS (dB)", "Source Peak (dB)", "Target RMS (dB)", "Target Peak (dB)", "Output RMS (dB)", "Output Peak (dB)", "RMS Difference (dB)"]
     for col, header in enumerate(headers):
         worksheet.write(0, col, header)
 
@@ -183,45 +156,36 @@ def compile_report(
 
             if os.path.isfile(source_file) and os.path.isfile(output_file):
                 source_rms_db, source_peak_db = get_rms_and_peak(source_file)
-                target_rms_db, target_peak_db = get_rms_and_peak(target_file)  # Get target file RMS and Peak
+                target_rms_db, target_peak_db = get_rms_and_peak(target_file)
                 output_rms_db, output_peak_db = get_rms_and_peak(output_file)
-                rms_difference_out = abs(source_rms_db - output_rms_db)
+                rms_difference_out = source_rms_db - output_rms_db
 
-                # Write data to the worksheet
                 worksheet.write(row, 0, filename)
                 worksheet.write(row, 1, source_rms_db)
                 worksheet.write(row, 2, source_peak_db)
-                worksheet.write(row, 3, target_rms_db)  # New data
-                worksheet.write(row, 4, target_peak_db) # New data
+                worksheet.write(row, 3, target_rms_db)
+                worksheet.write(row, 4, target_peak_db)
                 worksheet.write(row, 5, output_rms_db)
                 worksheet.write(row, 6, output_peak_db)
                 worksheet.write(row, 7, rms_difference_out)
 
                 row += 1
 
-    # Close the workbook
     workbook.close()
 
 
 def main():
-    """Main entrypoint for this `dad_version.py` script."""
-
-    # Ask the user for the source, target, and output directories
     source_dir_input = input("Enter the path for the source directory: ")
     target_dir_input = input("Enter the path for the target directory: ")
     output_dir_input = input("Enter the path for the output directory: ")
 
-    # Convert user input to Path objects
     source_dir = Path(source_dir_input).resolve()
     target_dir = Path(target_dir_input).resolve()
     output_dir = Path(output_dir_input).resolve()
 
-    # Rest of your code remains the same
     report_path = output_dir / 'report.xlsx'
-
     source_suffix = "_ENG.wav"
     target_suffix = "_ITA.wav"
-
     user_defined_peak_limit = -0.5
     user_defined_rms_diff_threshold = 2
 
