@@ -49,7 +49,7 @@ def apply_compression_gain_and_limiting(
         "pcm_s24le",
         output_file,
     ]
-    subprocess.run(command)
+    subprocess.run(command, stdout=subprocess.DEVNULL, stderr = subprocess.DEVNULL)
 
 
 def process_audio_files(
@@ -72,6 +72,7 @@ def process_audio_files(
             output_file = os.path.join(output_dir, filename)
 
             if os.path.isfile(source_file) and os.path.isfile(target_file):
+                print(f"\n=== Trying to match {filename}  ===\n")
                 source_rms_db, _ = get_rms_and_peak(source_file)
                 target_rms_db, target_peak_db = get_rms_and_peak(target_file)
 
@@ -95,39 +96,39 @@ def process_audio_files(
                     print(f"ELIF Applied gain adjustment : decreased {adjusted_gain_db} dB for file {filename}")
 
                 else:
+                    print("Using acompressor to scale file to increase rms.")
                     gain_db = rms_difference
-                    print(f"Gain_db after else= {gain_db} = source_rms_db - target_rms_db")
-                    adjusted_gain_db = gain_db - 1 if target_peak_db + gain_db > 0 else gain_db
-                    print(f"adjusted_gain_db = {adjusted_gain_db} =gain_db - 2 if target_peak_db + gain_db > 0 else gain_db")
-
-                    # Calculate and clamp threshold_db within 0.5 to 1
-                    threshold_db = -adjusted_gain_db-2
-                    print(f" threshold_db = {threshold_db} == -adjusted_gain_db - 3")
+                    print(f"target file {filename} loudness was {gain_db=} lower than source: output file compressed")
                     
-                    threshold_db = max(-30, min(threshold_db, 0))
-                    print(f" threshold_db after clamping = {threshold_db} ")
+                    # Calculate and clamp threshold_db within 0.5 to 1
+                    threshold_db = -gain_db-2
+                    print(f"{threshold_db=}")
+                    
+                    threshold_db = max(-40, min(threshold_db, 0))
+                    print(f"threshold_db after clamping = {threshold_db} ")
  
                     apply_compression_gain_and_limiting(
                         target_file,
                         output_file,
-                        adjusted_gain_db,
+                        gain_db,
                         threshold_db,
                         20,
                         peak_limit,
                     )
-                    print(f"target file {filename} loudness was {gain_db} lower than source: output file compressed")
                     output_rms_db, _ = get_rms_and_peak(output_file)
-                    rms_difference_out = abs(source_rms_db - output_rms_db)
-                    if rms_difference_out > rms_diff_threshold:
-                        print(f"Reprocessing file {filename} due to high RMS difference.")
-                        apply_compression_gain_and_limiting(
-                            target_file,
-                            output_file,
-                            rms_difference_out,
-                            -rms_difference_out,
-                            20,
-                            peak_limit,
-                        )
+                    rms_difference_out = source_rms_db - output_rms_db
+                    print(f"{output_rms_db=}")
+                    # if rms_difference_out > rms_diff_threshold:
+                    #     print(f"Reprocessing file {filename} due to high output RMS difference of {rms_difference_out}.")
+                    #     apply_compression_gain_and_limiting(
+                    #         target_file,
+                    #         output_file,
+                    #         rms_difference_out,
+                    #         -rms_difference_out-1,
+                    #         20,
+                    #         peak_limit,
+                    #     )
+                    #     print(f"Reprocessed rms output: {get_rms_and_peak(output_file)[0]}")
 
                 print(f"Processed: {filename}")
             else:
